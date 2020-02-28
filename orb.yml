@@ -1,0 +1,121 @@
+version: 2.1
+
+description: Delta misspell reports
+orbs:
+  dscar: naokikimura/dscar@0.0.11
+executors:
+  default:
+    description: Use a CircleCI convenience image to analyze code statically
+    docker:
+      - image: circleci/golang
+commands:
+  execute:
+    description: Calculate the difference of misspell results between HEAD branch and BASE branch
+    parameters:
+      patterns-to-include:
+        description: Specify patterns to include by regular expression (Multiple patterns can be specified by separating them with line feed)
+        type: string
+        default: ".*"
+      patterns-to-exclude:
+        description: Specify patterns to exclude by regular expression (Multiple patterns can be specified by separating them with line feed)
+        type: string
+        default: ""
+      starting-points:
+        description: Specify the path of starting to search for files to analyze (Multiple paths can be specified by separating them with line feed)
+        type: string
+        default: "."
+      ignore:
+        description: ignore the following corrections, comma separated
+        type: string
+        default: ""
+      locale:
+        description: Correct spellings using locale perferances for US or UK.  Default is to use a neutral variety of English.  Setting locale to US will correct the British spelling of 'colour' to 'color'
+        type: enum
+        enum: ["US", "UK"]
+        default: "US"
+      test-results-path:
+        description: Specify the value of the path parameter in the store_test_results step if you need to change it
+        type: string
+        default: "/tmp/test-results"
+    steps:
+      - run:
+          name: Install misspell
+          command: go get -u github.com/client9/misspell/cmd/misspell
+      - dscar/execute:
+          analysis-name: misspell
+          analysis-command: |
+            {
+              echo '<testsuites>'
+              {
+                {
+                  cat \<<-"EOT" | awk NF | while read -r path; do printf '%q\n' "$path" || exit $?; done
+            << parameters.starting-points >>
+            EOT
+                }
+                echo '-type f ( -path ""'
+                {
+                  cat \<<-"EOT" | awk NF | while read -r pattern; do printf -- '-o -regex %q\n' "$pattern" || exit $? ; done
+            << parameters.patterns-to-include >>
+            EOT
+                }
+                echo ') '
+                {
+                  cat \<<-"EOT" | awk NF | while read -r pattern; do printf '! -regex %q\n' "$pattern" || exit $? ; done
+            << parameters.patterns-to-exclude >>
+            EOT
+                }
+                echo '-print'
+              } | tee /dev/stderr | xargs find -D tree | tee /dev/stderr | tr '\n' '\0' |
+              xargs -0 misspell -locale << parameters.locale >> -i '<< parameters.ignore >>' -f '
+              <testsuite id="0" package="misspell" name="{{ .Filename | html }}" timestamp="'`date '+%Y-%m-%dT%H:%M:%S'`'" hostname="'`hostname`'" tests="1" failures="1" errors="0" time="0">
+                <properties /><system-out /><system-err />
+                <testcase name="Replace" classname="Replacer" time="0">
+                  <failure type="misspelling">{{ .Filename | html }}:{{ .Line | html }}:{{ .Column | html }}: {{ printf "%q" .Original | html }} is a misspelling of {{ printf "%q" .Corrected | html }}</failure>
+                </testcase>
+              </testsuite>'
+              EXIT_STATUS=$?
+              echo '</testsuites>'
+              exit $EXIT_STATUS
+            } \
+          calculate-options: --test-case-key='concat(@classname,"#",@name,"=>",normalize-space())'
+          test-results-path: << parameters.test-results-path >>
+          analysis-exit-code-threshold: 2
+          should-save-analysis-results-as-artifacts: true
+jobs:
+  execute:
+    description: Calculate the difference of misspell results between HEAD branch and BASE branch
+    parameters:
+      patterns-to-include:
+        description: Specify patterns to include by regular expression (Multiple patterns can be specified by separating them with line feed)
+        type: string
+        default: ".*"
+      patterns-to-exclude:
+        description: Specify patterns to exclude by regular expression (Multiple patterns can be specified by separating them with line feed)
+        type: string
+        default: ""
+      starting-points:
+        description: Specify the path of starting to search for files to analyze (Multiple paths can be specified by separating them with line feed)
+        type: string
+        default: "."
+      ignore:
+        description: ignore the following corrections, comma separated
+        type: string
+        default: ""
+      locale:
+        description: Correct spellings using locale perferances for US or UK.  Default is to use a neutral variety of English.  Setting locale to US will correct the British spelling of 'colour' to 'color'
+        type: enum
+        enum: ["US", "UK"]
+        default: "US"
+      test-results-path:
+        description: Specify the value of the path parameter in the store_test_results step if you need to change it
+        type: string
+        default: "/tmp/test-results"
+    executor: default
+    steps:
+      - execute:
+          patterns-to-include: << parameters.patterns-to-include >>
+          patterns-to-exclude: << parameters.patterns-to-exclude >>
+          starting-points: << parameters.starting-points >>
+          ignore: << parameters.ignore >>
+          locale: << parameters.locale >>
+          test-results-path: << parameters.test-results-path >>
