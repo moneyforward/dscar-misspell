@@ -1,11 +1,24 @@
 version: 2.1
 
 description: Delta misspell reports
+
 orbs:
-  dscar: naokikimura/dscar@0.1.0
+  dscar: naokikimura/dscar@0.5.0
+
+executors:
+  default:
+    description: Default misspell execution environment
+    parameters:
+      docker-image:
+        description: Specify the image used to execute misspell
+        type: string
+        default: circleci/golang:latest-node
+    docker:
+      - image: << parameters.docker-image >>
+
 commands:
-  execute:
-    description: Calculate the difference of misspell results between HEAD branch and BASE branch
+  analyze:
+    description: Analyze code statically using misspell
     parameters:
       patterns-to-include:
         description: Specify patterns to include by regular expression (Multiple patterns can be specified by separating them with line feed)
@@ -28,21 +41,24 @@ commands:
         type: enum
         enum: ["US", "UK"]
         default: "US"
-      test-results-path:
-        description: Specify the value of the path parameter in the store_test_results step if you need to change it
+      no-analysis-output-timeout:
+        description: Elapsed time the command can run without output. The string is a decimal with unit suffix, such as “20m”, “1.25h”, “5s”
         type: string
-        default: "/tmp/test-results"
+        default: 10m
+      prepare:
+        description: Specify the required steps before analysis if necessary
+        type: steps
+        default:
+          - run: go get -u github.com/client9/misspell/cmd/misspell
+      redirecting-output:
+        description: Specify "/dev/null" if you do not want to display the analysis results on the standard output
+        type: enum
+        enum: ["/dev/stdout", "/dev/stderr", "/dev/null"]
+        default: "/dev/null"
     steps:
-      - dscar/execute:
-          prepare-to-execute:
-            - run:
-                name: Install misspell
-                command: go get -u github.com/client9/misspell/cmd/misspell
-          should-find: "true"
-          patterns-to-include: << parameters.patterns-to-include >>
-          patterns-to-exclude: << parameters.patterns-to-exclude >>
-          starting-points: << parameters.starting-points >>
-          prepare-to-analyze:
+      - dscar/analyze:
+          step-name: Analyze code statically using misspell
+          prepare:
             - run:
                 name: export ANALYSIS_ARGUMENTS
                 environment:
@@ -57,53 +73,166 @@ commands:
                     -f '<testsuite id="0" package="misspell" name="{{ .Filename | html }}" timestamp="`date '+%Y-%m-%dT%H:%M:%S'`" hostname="`hostname`" tests="1" failures="1" errors="0" time="0"><properties /><system-out /><system-err /><testcase name="Replace" classname="Replacer" time="0"><failure type="misspelling">{{ .Filename | html }}:{{ .Line | html }}:{{ .Column | html }}: {{ printf "%q" .Original | html }} is a misspelling of {{ printf "%q" .Corrected | html }}</failure></testcase></testsuite>'
                   )
                   EOT
-          analysis-name: misspell
+            - steps: << parameters.prepare >>
           analysis-command: misspell
-          analysis-result-header-command: echo
-          analysis-result-header-arguments: <testsuites>
-          analysis-result-footer-command: echo
-          analysis-result-footer-arguments: </testsuites>
-          calculate-options: --test-case-key=concat(@classname,"#",@name,"=>",normalize-space())
-          test-results-path: << parameters.test-results-path >>
-          analysis-exit-code-threshold: 2
-          should-save-analysis-results-as-artifacts: true
-jobs:
+          header-command: echo
+          header-arguments: <testsuites>
+          footer-command: echo
+          footer-arguments: </testsuites>
+          should-find: "true"
+          patterns-to-include: << parameters.patterns-to-include >>
+          patterns-to-exclude: << parameters.patterns-to-exclude >>
+          starting-points: << parameters.starting-points >>
+          no-output-timeout: << parameters.no-analysis-output-timeout >>
+          redirecting-output: << parameters.redirecting-output >>
+  calculate:
+    description: |
+      Calculate the difference between the analysis results
+
+      Use the [junit-reports-combiner][1] command to calculate the difference
+
+      [1]: https://www.npmjs.com/package/junit-reports-combiner
+    parameters:
+      first-result-path:
+        description: Path of the file to use as the minuend
+        type: string
+        default: "HEAD-analysis-results.xml"
+      second-result-path:
+        description: Path of the file to use as the subtrahend
+        type: string
+        default: "BASE-analysis-results.xml"
+      delta-result-path:
+        description: Path to save difference of analysis results
+        type: string
+        default: "/dev/null"
+      should-install-node_js:
+        description: Specify true if the execution environment does not have Node.js installed
+        type: boolean
+        default: false
+    steps:
+      - dscar/calculate:
+          options: --test-case-key=concat(@classname,"#",@name,"=>",normalize-space())
+          first-result-path: << parameters.first-result-path >>
+          second-result-path: << parameters.second-result-path >>
+          delta-result-path: << parameters.delta-result-path >>
+          should-install-node_js: << parameters.should-install-node_js >>
   execute:
     description: Calculate the difference of misspell results between HEAD branch and BASE branch
     parameters:
-      patterns-to-include:
-        description: Specify patterns to include by regular expression (Multiple patterns can be specified by separating them with line feed)
-        type: string
-        default: ".*"
-      patterns-to-exclude:
-        description: Specify patterns to exclude by regular expression (Multiple patterns can be specified by separating them with line feed)
-        type: string
-        default: ""
-      starting-points:
-        description: Specify the path of starting to search for files to analyze (Multiple paths can be specified by separating them with line feed)
-        type: string
-        default: "."
-      ignore:
-        description: ignore the following corrections, comma separated
-        type: string
-        default: ""
-      locale:
-        description: Correct spellings using locale perferances for US or UK.  Default is to use a neutral variety of English.  Setting locale to US will correct the British spelling of 'colour' to 'color'
-        type: enum
-        enum: ["US", "UK"]
-        default: "US"
+      analyze:
+        description: Specify analysis steps
+        type: steps
+        default:
+          - analyze:
+              prepare: []
+      calculate:
+        description: Specify the steps for calculating the difference
+        type: steps
+        default:
+          - calculate
       test-results-path:
         description: Specify the value of the path parameter in the store_test_results step if you need to change it
         type: string
         default: "/tmp/test-results"
-    executor:
-      name: dscar/default
-      docker-image: circleci/golang
+    steps:
+      - run: go get -u github.com/client9/misspell/cmd/misspell
+      - dscar/execute:
+          analysis-name: misspell
+          analyze: << parameters.analyze >>
+          calculate: << parameters.calculate >>
+          test-results-path: << parameters.test-results-path >>
+
+jobs:
+  analyze:
+    description: Analyze code statically using misspell
+    parameters:
+      executor:
+        description: Specify the image used to execute analysis
+        type: executor
+        default: default
+      is-target-branch-base:
+        description: Check-out the BASE branch if true is specified
+        type: boolean
+        default: false
+      analyze:
+        description: Specify analysis steps
+        type: steps
+        default:
+          - analyze
+      analysis-results-path:
+        description: Specify the path to save the analysis results if you need to change it
+        type: string
+        default: "/tmp/analysis-results"
+    executor: << parameters.executor >>
+    steps:
+      - dscar/set-analysis-result-path:
+          analysis-name: misspell
+          analysis-results-path: << parameters.analysis-results-path >>
+          is-target-branch-base: << parameters.is-target-branch-base >>
+      - dscar/checkout-analysis-target:
+          is-target-branch-base: << parameters.is-target-branch-base >>
+      - steps: << parameters.analyze >>
+      - store_test_results:
+          path: << parameters.analysis-results-path >>
+  calculate:
+    description: |
+      Calculate the difference between the analysis results
+
+      Use the [junit-reports-combiner][1] command to calculate the difference
+
+      [1]: https://www.npmjs.com/package/junit-reports-combiner
+    parameters:
+      executor:
+        description: Specify the image used to execute analysis
+        type: executor
+        default: default
+      calculate:
+        description: Specify the steps for calculating the difference
+        type: steps
+        default:
+          - calculate
+      analysis-results-path:
+        description: Specify the path to save the analysis results if you need to change it
+        type: string
+        default: "/tmp/analysis-results"
+      test-results-path:
+        description: Specify the value of the path parameter in the store_test_results step if you need to change it
+        type: string
+        default: "/tmp/test-results"
+    executor: << parameters.executor >>
+    steps:
+      - dscar/set-result-paths:
+          analysis-name: misspell
+          analysis-results-path: << parameters.analysis-results-path >>
+          test-results-path: << parameters.test-results-path >>
+      - steps: << parameters.calculate >>
+      - store_test_results:
+          path: << parameters.test-results-path >>
+  execute:
+    description: Calculate the difference of misspell results between HEAD branch and BASE branch
+    parameters:
+      executor:
+        description: Specify the image used to execute analysis
+        type: executor
+        default: default
+      analyze:
+        description: Specify analysis steps
+        type: steps
+        default:
+          - analyze:
+              prepare: []
+      calculate:
+        description: Specify the steps for calculating the difference
+        type: steps
+        default:
+          - calculate
+      test-results-path:
+        description: Specify the value of the path parameter in the store_test_results step if you need to change it
+        type: string
+        default: "/tmp/test-results"
+    executor: << parameters.executor >>
     steps:
       - execute:
-          patterns-to-include: << parameters.patterns-to-include >>
-          patterns-to-exclude: << parameters.patterns-to-exclude >>
-          starting-points: << parameters.starting-points >>
-          ignore: << parameters.ignore >>
-          locale: << parameters.locale >>
+          analyze: << parameters.analyze >>
+          calculate: << parameters.calculate >>
           test-results-path: << parameters.test-results-path >>
