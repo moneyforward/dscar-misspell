@@ -3,7 +3,7 @@ version: 2.1
 description: Delta misspell reports
 
 orbs:
-  dscar: naokikimura/dscar@0.5.4
+  dscar: naokikimura/dscar@0.6.1
 
 executors:
   default:
@@ -75,52 +75,21 @@ commands:
                   export ANALYSIS_ARGUMENTS=(
                     -locale "$ARG_LOCALE"
                     -i "$ARG_IGNORE"
-                    -f '<testsuite id="0" package="misspell" name="{{ .Filename | html }}" timestamp="`date '+%Y-%m-%dT%H:%M:%S'`" hostname="`hostname`" tests="1" failures="1" errors="0" time="0"><properties /><system-out /><system-err /><testcase name="Replace" classname="Replacer" time="0"><failure type="misspelling">{{ .Filename | html }}:{{ .Line | html }}:{{ .Column | html }}: {{ printf "%q" .Original | html }} is a misspelling of {{ printf "%q" .Corrected | html }}</failure></testcase></testsuite>'
+                    -f '<file name="{{ .Filename | html }}"><error source="misspelling" line="{{ .Line | html }}" column="{{ .Column | html }}" message="{{ printf "%q" .Original | html }} is a misspelling of {{ printf "%q" .Corrected | html }}" /></file>'
                   )
                   EOT
             - steps: << parameters.prepare >>
           analysis-command: misspell
           header-command: echo
-          header-arguments: <testsuites>
+          header-arguments: <checkstyle>
           footer-command: echo
-          footer-arguments: </testsuites>
+          footer-arguments: </checkstyle>
           should-find: "true"
           patterns-to-include: << parameters.patterns-to-include >>
           patterns-to-exclude: << parameters.patterns-to-exclude >>
           starting-points: << parameters.starting-points >>
           no-output-timeout: << parameters.no-analysis-output-timeout >>
           redirecting-output: << parameters.redirecting-output >>
-  calculate:
-    description: |
-      Calculate the difference between the analysis results
-
-      Use the [junit-reports-combiner][1] command to calculate the difference
-
-      [1]: https://www.npmjs.com/package/junit-reports-combiner
-    parameters:
-      first-result-path:
-        description: Path of the file to use as the minuend
-        type: string
-        default: "HEAD-analysis-results.xml"
-      second-result-path:
-        description: Path of the file to use as the subtrahend
-        type: string
-        default: "BASE-analysis-results.xml"
-      delta-result-path:
-        description: Path to save difference of analysis results
-        type: string
-        default: "/dev/null"
-      should-install-node_js:
-        description: Specify true if the execution environment does not have Node.js installed
-        type: boolean
-        default: false
-    steps:
-      - dscar/calculate:
-          options: --test-case-key=concat(@classname,"#",@name,"=>",normalize-space())
-          first-result-path: << parameters.first-result-path >>
-          second-result-path: << parameters.second-result-path >>
-          delta-result-path: << parameters.delta-result-path >>
-          should-install-node_js: << parameters.should-install-node_js >>
   execute:
     description: Calculate the difference of misspell results between HEAD branch and BASE branch
     parameters:
@@ -146,11 +115,7 @@ commands:
         description: Specify the steps for calculating the difference
         type: steps
         default:
-          - calculate
-      test-results-path:
-        description: Specify the value of the path parameter in the store_test_results step if you need to change it
-        type: string
-        default: "/tmp/test-results"
+          - dscar/calculate
       project-path:
         description: "Absolute path to your project's base directory, necessary for running git commands (default: job’s working_directory)"
         type: string
@@ -164,7 +129,6 @@ commands:
           analyze: << parameters.analyze >>
           analysis-results-path: << parameters.analysis-results-path >>
           calculate: << parameters.calculate >>
-          test-results-path: << parameters.test-results-path >>
           project-path: << parameters.project-path >>
 
 jobs:
@@ -196,9 +160,13 @@ jobs:
         description: Specify the path to save the analysis results if you need to change it
         type: string
         default: "/tmp/analysis-results"
+      test-results-path:
+        description: Specify the value of the path parameter in the store_test_results step if you need to change it
+        type: string
+        default: "/tmp/test-results"
     executor: << parameters.executor >>
     steps:
-      - dscar/set-analysis-result-path:
+      - dscar/set-result-path:
           analysis-name: misspell
           analysis-results-path: << parameters.analysis-results-path >>
           is-target-branch-base: << parameters.is-target-branch-base >>
@@ -207,13 +175,20 @@ jobs:
           has-reconstructed: << parameters.has-reconstructed >>
           attach-compare-url-workspace: << parameters.attach-compare-url-workspace >>
       - steps: << parameters.analyze >>
-      - store_test_results:
-          path: << parameters.analysis-results-path >>
+      - when:
+          condition: << parameters.test-results-path >>
+          steps:
+            - dscar/transform:
+                analysis-name: misspell
+                analysis-results-path: << parameters.analysis-results-path >>
+                test-results-path: << parameters.test-results-path >>
+            - store_test_results:
+                path: << parameters.test-results-path >>
   calculate:
     description: |
       Calculate the difference between the analysis results
 
-      Use the [junit-reports-combiner][1] command to calculate the difference
+      Use the [checkstyle-reports-combiner][1] command to calculate the difference
 
       [1]: https://www.npmjs.com/package/junit-reports-combiner
     parameters:
@@ -225,7 +200,7 @@ jobs:
         description: Specify the steps for calculating the difference
         type: steps
         default:
-          - calculate
+          - dscar/calculate
       analysis-results-path:
         description: Specify the path to save the analysis results if you need to change it
         type: string
@@ -236,11 +211,15 @@ jobs:
         default: "/tmp/test-results"
     executor: << parameters.executor >>
     steps:
-      - dscar/set-result-paths:
+      - dscar/set-analysis-result-paths:
+          analysis-name: misspell
+          analysis-results-path: << parameters.analysis-results-path >>
+      - steps: << parameters.calculate >>
+      - dscar/transform:
           analysis-name: misspell
           analysis-results-path: << parameters.analysis-results-path >>
           test-results-path: << parameters.test-results-path >>
-      - steps: << parameters.calculate >>
+          pattern: '.*/DELTA-analysis-results\.xml$'
       - store_test_results:
           path: << parameters.test-results-path >>
   execute:
@@ -272,15 +251,11 @@ jobs:
         description: Specify the steps for calculating the difference
         type: steps
         default:
-          - calculate
+          - dscar/calculate
       test-results-path:
         description: Specify the value of the path parameter in the store_test_results step if you need to change it
         type: string
         default: "/tmp/test-results"
-      should-save-analysis-results-as-artifacts:
-        description: Specify true if analysis results should be saved as artifacts
-        type: boolean
-        default: false
     executor: << parameters.executor >>
     steps:
       - execute:
@@ -289,11 +264,10 @@ jobs:
           analyze: << parameters.analyze >>
           analysis-results-path: << parameters.analysis-results-path >>
           calculate: << parameters.calculate >>
+      - dscar/transform:
+          analysis-name: misspell
+          analysis-results-path: << parameters.analysis-results-path >>
           test-results-path: << parameters.test-results-path >>
+          pattern: '.*/DELTA-analysis-results\.xml$'
       - store_test_results:
           path: << parameters.test-results-path >>
-      - when:
-          condition: << parameters.should-save-analysis-results-as-artifacts >>
-          steps:
-            - store_artifacts:
-                path: << parameters.analysis-results-path >>
