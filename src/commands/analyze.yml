@@ -7,7 +7,7 @@ parameters:
   patterns-to-exclude:
     description: Specify patterns to exclude by regular expression (Multiple patterns can be specified by separating them with line feed)
     type: string
-    default: ""
+    default: '^\./\.git/.*'
   starting-points:
     description: Specify the path of starting to search for files to analyze (Multiple paths can be specified by separating them with line feed)
     type: string
