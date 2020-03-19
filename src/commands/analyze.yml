@@ -21,6 +21,14 @@ parameters:
     type: enum
     enum: ["US", "UK"]
     default: "US"
+  error-pattern:
+    description: Specify the pattern if you want to detect analyzing errors from the standard error
+    type: string
+    default: '.*'
+  result-path:
+    description: Path to save analysis result
+    type: string
+    default: "/dev/null"
   no-analysis-output-timeout:
     description: Elapsed time the command can run without output. The string is a decimal with unit suffix, such as “20m”, “1.25h”, “5s”
     type: string
@@ -59,6 +67,7 @@ steps:
               EOT
         - steps: << parameters.prepare >>
       analysis-command: misspell
+      error-pattern: << parameters.error-pattern >>
       header-command: echo
       header-arguments: <checkstyle>
       footer-command: echo
@@ -67,6 +76,7 @@ steps:
       patterns-to-include: << parameters.patterns-to-include >>
       patterns-to-exclude: << parameters.patterns-to-exclude >>
       starting-points: << parameters.starting-points >>
+      result-path: << parameters.result-path >>
       no-output-timeout: << parameters.no-analysis-output-timeout >>
       redirecting-output: << parameters.redirecting-output >>
       max-procs: << parameters.max-procs >>
