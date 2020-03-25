@@ -69,12 +69,12 @@ steps:
               </file>
               EOT
               )"
-              declare -ax TRANSFORMATION_ARGUMENTS=(
+              declare -ax ANALYSIS_ARGUMENTS=(
                 -locale "$ARG_LOCALE"
                 -i "$ARG_IGNORE"
                 -f "$FILTER"
               )
-              echo "$(declare -p TRANSFORMATION_ARGUMENTS)" >> $BASH_ENV
+              echo "$(declare -p ANALYSIS_ARGUMENTS)" >> $BASH_ENV
         - steps: << parameters.prepare >>
       analysis-command: misspell
       error-pattern: << parameters.error-pattern >>
