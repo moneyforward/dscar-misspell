@@ -17,7 +17,9 @@ parameters:
     type: string
     default: ""
   locale:
-    description: Correct spellings using locale perferances for US or UK.  Default is to use a neutral variety of English.  Setting locale to US will correct the British spelling of 'colour' to 'color'
+    description: |
+      Correct spellings using locale perferances for US or UK.  Default is to use a neutral variety of English.
+      Setting locale to US will correct the British spelling of 'colour' to 'color'
     type: enum
     enum: ["US", "UK"]
     default: "US"
@@ -50,13 +52,20 @@ steps:
               ARG_IGNORE: << parameters.ignore >>
             command: |
               set -x
-              cat \<<-EOT >> $BASH_ENV
-              export ANALYSIS_ARGUMENTS=(
+              FILTER="$(
+              cat \<<-EOT | tr -s ' \n' ' '
+              <file name="{{ .Filename | html }}">
+                <error source="misspelling" line="{{ .Line | html }}" column="{{ .Column | html }}"
+                  message="{{ printf "%q" .Original | html }} is a misspelling of {{ printf "%q" .Corrected | html }}" />
+              </file>
+              EOT
+              )"
+              declare -ax TRANSFORMATION_ARGUMENTS=(
                 -locale "$ARG_LOCALE"
                 -i "$ARG_IGNORE"
-                -f '<file name="{{ .Filename | html }}"><error source="misspelling" line="{{ .Line | html }}" column="{{ .Column | html }}" message="{{ printf "%q" .Original | html }} is a misspelling of {{ printf "%q" .Corrected | html }}" /></file>'
+                -f "$FILTER"
               )
-              EOT
+              echo "$(declare -p TRANSFORMATION_ARGUMENTS)" >> $BASH_ENV
         - steps: << parameters.prepare >>
       analysis-command: misspell
       header-command: echo
