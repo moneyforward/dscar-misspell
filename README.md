@@ -1,5 +1,7 @@
 # dscar-misspell
 
+[![CircleCI](https://circleci.com/gh/moneyforward/dscar-misspell.svg?style=svg)](https://circleci.com/gh/moneyforward/dscar-misspell)
+
 Delta [misspell](https://github.com/client9/misspell)  reports running on CircleCI
 
 See https://circleci.com/orbs/registry/orb/moneyforward/dscar-misspell for details.
